@@ -1,0 +1,207 @@
+---
+title: "Final_Project"
+author: "Daria"
+date: "`r Sys.Date()`"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+## Installing and loading packages
+```{r}
+# if (!requireNamespace("BiocManager", quietly = TRUE))
+#   install.packages("BiocManager")
+# BiocManager::install(version = "3.16")
+
+# BiocManager::install("DESeq2")
+library("DESeq2")
+
+# install.packages("ggplot2")
+library("ggplot2")
+
+# # Installing and loading packages
+# if (!requireNamespace("BiocManager", quietly = TRUE))
+#     install.packages("BiocManager")
+# 
+# BiocManager::install("ComplexHeatmap")
+
+# Load the package
+library(ComplexHeatmap)
+
+BiocManager::install("edgeR")
+library(edgeR)
+```
+
+## Preprocessing the dataset before the analysis
+```{r}
+# Load the data
+data <- read.table("/Users/darialaricheva/Homeworks_mol_profiling/Final Project/counts_data/combined_counts.txt", header = TRUE, sep = "\t")
+
+# Select only counts
+counts_only <- data[, c(1, 7:ncol(data))]
+
+# Extract sample names
+sample_names <- sapply(strsplit(colnames(counts_only)[2:8], split = "[./]"), function(x) x[which(grepl("SRR", x))])
+
+# Replace the original column names with the new sample names
+colnames(counts_only)[2:8] <- sample_names
+
+# Change Geneid column name to GeneName
+colnames(counts_only)[1] <- "GeneName"
+```
+
+## Differential gene expression analysis
+```{r}
+# Format the data
+counts <- as.matrix(counts_only[,-1])
+rownames(counts) = counts_only$GeneName
+
+# colData
+colData <- data.frame(
+  row.names = colnames(counts),
+  condition = factor(c("MT", "PT", "PT", "MT", "MT", "MT", "PT"),
+                     levels = c("PT", "MT"))
+  
+)
+
+# DDS
+dds <- DESeqDataSetFromMatrix(countData = counts,
+                              colData = colData,
+                              design = ~ condition)
+
+# Run the differential expression analysis
+dds <- DESeq(dds)
+
+results <- results(dds)
+
+# Order genes
+ordered_genes <- results[order(results$padj, -results$log2FoldChange), ]
+
+# Significant genes
+significant_genes <- ordered_genes[!is.na(ordered_genes$padj) & ordered_genes$padj < 0.05 & !is.na(ordered_genes$log2FoldChange) & abs(ordered_genes$log2FoldChange) > 2, ]
+```
+
+## Volcano Plot to see the distribution of p-values and fold changes
+```{r}
+# Calculate -log10 of the p-values
+results$negLogP <- -log10(results$pvalue)
+
+# Ensure to handle any potential Inf or -Inf values which can occur if a p-value is exactly 0
+results$negLogP[is.infinite(results$negLogP)] <- max(results$negLogP[!is.infinite(results$negLogP)], na.rm = TRUE) + 2
+
+# Volcano plot
+ggplot(results, aes(x=log2FoldChange, y=negLogP)) +
+  geom_point(aes(color = padj < 0.05), alpha = 0.5) + 
+  scale_color_manual(values = c("grey", "red")) +
+  labs(x = "Log2 Fold Change",
+       y = "-Log10 p-value",
+       title = "Volcano Plot of Differential Expression") +
+  theme_minimal()
+```
+
+## Heatmap Vizualisation
+```{r fig.width = 7, fig.height = 15}
+# Obtain normalized counts from DESeq2
+normalized_counts <- counts(dds, normalized = TRUE)
+
+# Subset normalized counts to only include significant differentially expressed genes
+sig_counts <- normalized_counts[rownames(normalized_counts) %in% rownames(significant_genes), ]
+
+# Log-transform normalized counts for better visualization
+log_sig_counts <- log2(sig_counts + 1)  # Adding 1 to prevent log(0)
+
+# Ensure the factor levels are in the order
+colData$condition <- factor(colData$condition, levels = c("PT", "MT"))
+
+# Order colData based on the factor levels
+ordered_index <- order(colData$condition)
+
+# Reorder the columns of log_sig_counts according to the ordered index
+ordered_log_sig_counts <- log_sig_counts[, ordered_index]
+
+column_ha <- HeatmapAnnotation(df = data.frame(Condition = colData$condition[ordered_index]),
+                                       show_annotation_name = TRUE)
+```
+
+### Clustering
+```{r fig.width = 10, fig.height = 20}
+## 4
+# Function to create heatmaps with k-means clustering
+create_heatmaps <- function(ordered_log_sig_counts) {
+    k_values <- c(2,3,4,5,6,7,8)
+    heatmaps <- list()
+    clustering_results <- list()
+    
+    for (k in k_values) {
+        # Perform k-means clustering on the genes with K = k
+        set.seed(456)
+        km <- kmeans(ordered_log_sig_counts, centers = k)
+        
+        # Save clustering results
+        clustering_results[[paste("K", k, sep = "")]] <- km
+        
+        # Order the rows by cluster assignments
+        ordered_indices <- order(km$cluster)
+        ordered_data_matrix <- ordered_log_sig_counts[ordered_indices, ]
+        
+        # Add cluster information as a row annotation for the heatmap
+        gene_annotation <- rowAnnotation(cluster = factor(km$cluster[ordered_indices]))
+        
+        # Create a heatmap with the data matrix and gene clusters annotation
+        heatmap <- Heatmap(ordered_data_matrix, 
+                           name = "log2(Normalized Counts + 1)",
+                           cluster_columns = FALSE,
+                           cluster_rows = FALSE,
+                           right_annotation = gene_annotation,
+                           top_annotation = column_ha,
+                           column_title = paste("K =", k))
+        
+        heatmaps[[paste("K", k, sep = "")]] <- heatmap
+    }
+    
+    return(list(heatmaps = heatmaps, clustering_results = clustering_results))
+}
+
+# Create heatmaps
+results <- create_heatmaps(ordered_log_sig_counts)
+
+# Extract heatmaps and clustering results
+heatmaps <- results$heatmaps
+clustering_results <- results$clustering_results
+
+# Draw the heatmaps
+draw(heatmaps$K2)
+draw(heatmaps$K3)
+draw(heatmaps$K4)
+draw(heatmaps$K5)
+draw(heatmaps$K6)
+draw(heatmaps$K7)
+draw(heatmaps$K8)
+```
+
+### Retrieving cluster of upregulated genes in MT
+```{r}
+# Retrieve the clustering result for K = 7
+km_k7 <- clustering_results$K7
+
+# Identify the indices of genes that belong to cluster 2 in K = 7
+cluster_7_indices <- which(km_k7$cluster == 2)
+
+# Extract the corresponding gene names from the original data
+gene_names_cluster_7 <- rownames(ordered_log_sig_counts)[cluster_7_indices]
+
+# Print the gene names in cluster 
+print(gene_names_cluster_7)
+```
+
+## Results of Gene Ontology enrichment analysis using DAVID
+![GO enrichment analysis](/Users/darialaricheva/Desktop/screenshot.png)
+
+## Supplementary Table
+```{r}
+filtered_genes <- significant_genes[rownames(significant_genes) %in% gene_names_cluster_7, ]
+
+write.csv(filtered_genes, "filtered_significant_genes.csv")
+```
