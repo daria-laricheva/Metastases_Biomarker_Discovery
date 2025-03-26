@@ -27,7 +27,7 @@ The primary objective of this project is to identify gene biomarkers that distin
      * gene expression quantification
 2. `Metastases_biomarker_discovery.Rmd` -- R Markdown file containing the full differential gene expression analysis
 3. `Metastases_biomarker_discovery.pdf` -- PDF rendering of the R Markdown file, including visualizations and results
-4. `Metastases_biomarker_discovery-Project_report.pdf` -- comprehensive project report detailing the rationale, step-by-step methodology, tool versions used, and interpretation of results.
+4. `Metastases_biomarker_discovery-Project_report.pdf` -- comprehensive project report detailing the rationale, step-by-step methodology, tool versions used, and interpretation of results
 5. `filtered_significant_genes.csv` -- CSV file containing significant genes identified through differential gene expression analysis
 6. `R_session_info.txt` -- TXT file containing the complete list of packages and versions used in the R environment
 
